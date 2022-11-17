@@ -44,14 +44,26 @@ EXAMPLES = r'''
 
 # =====================================================================
 
+import atexit
+import gc
 import subprocess
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.basic import env_fallback
 
+cmd = None
+password = None
+
 # ---------------------------------------------------------------------
 
+def clear_sensitive_data():
+    global cmd, password
+    del cmd, password
+    gc.collect()
+
 def run_module():
+    global cmd, password
+
     # Ansible Module arguments initialization:
     module_args = dict(
         password = dict(type='raw', required=True, no_log=True),
@@ -63,6 +75,9 @@ def run_module():
         argument_spec=module_args,
         supports_check_mode=False
     )
+
+    # Make sure we clear the sensitive data no matter the result:
+    atexit.register(clear_sensitive_data)
 
     password = module.params['password']
     keychain = module.params['keychain']
