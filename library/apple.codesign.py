@@ -8,7 +8,7 @@ __metaclass__ = type
 
 DOCUMENTATION = r'''
 ---
-module: app.codesign
+module: apple.codesign
 
 short_description: Code signing for macOS binaries
 

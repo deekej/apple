@@ -8,7 +8,7 @@ __metaclass__ = type
 
 DOCUMENTATION = r'''
 ---
-module: keychain.unlock
+module: apple.unlock_keychain
 
 short_description: Unlocks security keychain on macOS machine
 

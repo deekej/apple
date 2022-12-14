@@ -8,30 +8,23 @@ __metaclass__ = type
 
 DOCUMENTATION = r'''
 ---
-module: app.notatize
+module: apple.notarize_check
 
 short_description: Submits given path for macOS notarization on Apple's servers.
 
 description:
-  - This module submits given path for notarization of code signed binary / app.
-  - It uses the older M(altool) for the notarization submission.
 
 options:
-  path:
+  UUID:
     description:
-      - Path to M(zip) or M(pkg) file that needs to be notarized.
+      - UUID string (version 4) response which has been returned from Apple's servers during previous submission for notarization.
+      - This string can be also obtained from the return values of app.notarize module.
     required: true
-    type: path
+    type: string
 
   username:
     description:
       - Username of Apple developer account to use when running the notarization process.
-    required: true
-    type: string
-
-  bundle_ID:
-    description:
-      - String to uniquely identify the notarized file.
     required: true
     type: string
 
@@ -57,20 +50,6 @@ options:
       - Necessary when using M(API_key) option.
     required: false
     type: string
-    default: None
-
-  ASC_provider:
-    description:
-      - Needed when the Apple developer account is associated with multiple providers.
-    required: false
-    type: string
-    default: None
-
-  chdir:
-    description:
-      - Directory to change into before starting the notarization.
-    required: false
-    type: path
     default: None
 
   altool_binary:
@@ -110,38 +89,21 @@ options:
     type: boolean
     default: False
 
-  checksum_algorithm:
-    description:
-      - Selects the algorithm to use when computing checksum of the submitted file for notarization.
-      - The checksum of the submitted file is provided for logging purposes.
-    required: false
-    type: string
-    default: sha256
-    aliases:
-      - checksum
-      - checksum_algo
-    choices:
-      - md5
-      - sha1
-      - sha224
-      - sha256
-      - sha384
-      - sha512
-
 author:
     - Dee'Kej (@deekej)
 '''
 
 EXAMPLES = r'''
 - name: Notarize the previously signed & archived binaries
-  app.notarize:
-    path:         "signed-binaries-v{{ version }}.zip"
-    chdir:        /Users/deekej/build
+  app.notarize.check:
+    UUID:         "{{ notarization.UUID }}"
     username:     "{{ credentials.username }}"
     password:     "{{ credentials.password }}"
-    bundle_ID:    "app-name-v{{ version }}"
-    checksum:     sha256
-  register:       notarization
+  register:       check
+  until:          check.response == 'Package Approved'
+  failed_when:    check.status not in ['success', 'in progress']
+  retries:        60
+  delay:          60
   no_log:         true
 '''
 
@@ -151,6 +113,7 @@ import atexit
 import gc
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 
@@ -160,6 +123,7 @@ from ansible.module_utils.basic import env_fallback
 cmd = None
 API_key = None
 password = None
+UUID_regex = r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
 
 # ---------------------------------------------------------------------
 
@@ -174,26 +138,20 @@ def parse_plist(xml_string):
 
 
 def run_module():
-    global cmd, API_key, password
+    global cmd, API_key, password, UUID_regex
 
     # Ansible Module arguments initialization:
     module_args = dict(
-        path               = dict(type='path', required=True),
+        UUID               = dict(type='str',  required=True),
         username           = dict(type='raw',  required=True),
-        bundle_ID          = dict(type='raw',  required=True),
         password           = dict(type='raw',  required=False, default=None, no_log=True),
         API_key            = dict(type='raw',  required=False, default=None, no_log=True),
         API_issuer         = dict(type='raw',  required=False, default=None),
-        ASC_provider       = dict(type='raw',  required=False, default=None),
-        chdir              = dict(type='path', required=False, default=None),
         altool_binary      = dict(type='path', required=False, default=None),
         xcrun_binary       = dict(type='path', required=False, default=None),
         sdk                = dict(type='raw',  required=False, default=None),
         toolchain          = dict(type='raw',  required=False, default=None),
-        nocache            = dict(type='bool', required=False, default=False),
-        checksum_algorithm = dict(type='str',  required=False, default='sha256',
-                                  choices=['md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512'],
-                                  aliases=['checksum', 'checksum_algo'])
+        nocache            = dict(type='bool', required=False, default=False)
     )
 
     # Parsing of Ansible Module arguments:
@@ -214,24 +172,16 @@ def run_module():
     # Make sure we clear the sensitive data no matter the result:
     atexit.register(clear_sensitive_data)
 
+    UUID               = module.params['UUID']
     username           = module.params['username']
-    bundle_ID          = module.params['bundle_ID']
     password           = module.params['password']
     API_key            = module.params['API_key']
     API_issuer         = module.params['API_issuer']
-    ASC_provider       = module.params['ASC_provider']
-    chdir              = module.params['chdir']
     altool_binary      = module.params['altool_binary']
     xcrun_binary       = module.params['xcrun_binary']
     sdk                = module.params['sdk']
     toolchain          = module.params['toolchain']
     nocache            = module.params['nocache']
-    checksum_algorithm = module.params['checksum_algorithm']
-
-    path = os.path.expanduser(module.params['path'])
-
-    if chdir:
-        chdir = os.path.expanduser(chdir)
 
     if altool_binary:
         altool_binary = os.path.expanduser(altool_binary)
@@ -243,32 +193,23 @@ def run_module():
     #       module does not apply any changes to its host or its files...
     result = dict(
         changed            = False,
-        path               = path,
+        UUID               = UUID,
         username           = username,
-        bundle_ID          = bundle_ID,
         password           = '[REDACTED]',
         API_key            = '[REDACTED]',
         API_issuer         = API_issuer,
-        ASC_provider       = ASC_provider,
-        chdir              = chdir,
         altool_binary      = altool_binary,
         xcrun_binary       = xcrun_binary,
         toolchain          = toolchain,
         sdk                = sdk,
-        nocache            = nocache,
-        checksum_algorithm = checksum_algorithm
+        nocache            = nocache
     )
 
     # -----------------------------------------------------------------
 
-    if chdir:
-        try:
-            os.chdir(chdir)
-        except Exception as ex:
-            module.fail_json(msg=str(ex), **result)
-
-    if not os.path.exists(path):
-        module.fail_json(msg="path does not exist: %s" % path, **result)
+    # We need the Version 4 UUID string:
+    if re.match(UUID_regex, UUID) is None:
+        module.fail_json(msg="invalid UUID string: %s" % UUID, **result)
 
     # -----------------------------------------------------------------
 
@@ -304,10 +245,8 @@ def run_module():
 
     cmd = [
         altool_binary,
-        '--notarize-app',
+        '--notarization-info', UUID,
         '--output-format', 'xml',
-        '--primary-bundle-id', bundle_ID,
-        '-f', path,
         '-u', username
     ]
 
@@ -317,12 +256,7 @@ def run_module():
         cmd.extend(['--apiKey', API_key])
         cmd.extend(['--apiIssuer', API_issuer])
 
-    if ASC_provider:
-        cmd.extend(['--asc-provider', ASC_provider])
-
     # -----------------------------------------------------------------
-
-    result['checksum'] = checksum = module.digest_from_file(path, checksum_algorithm)
 
     if password:
         result['command'] = (' '.join(cmd)).replace(password, '******')
@@ -339,8 +273,7 @@ def run_module():
         result['rc'] = ex.returncode
 
         response = parse_plist(ex.stdout)
-
-        error_msg = "submitting %s for notarization failed:\n" % path
+        error_msg = "obtaining notarization info for %s [UUID] failed:\n" % UUID
 
         for error in response['product-errors']:
             error_msg += "  - %s [code %s]\n" % (error['message'], error['code'])
@@ -353,11 +286,16 @@ def run_module():
 
     response = parse_plist(process.stdout)
 
-    result['msg']     = response['success-message']
-    result['UUID']    = response['notarization-upload']['RequestUUID']
+    notarize_info         = response['notarization-info']
+    result['msg']         = response['success-message']
 
-    result['status']  = 'success'
-    result['rc']      = process.returncode
+    result['logfile_URL'] = notarize_info['LogFileURL']
+    result['timestamp']   = notarize_info['Date'].isoformat()
+    result['checksum']    = notarize_info['Hash']
+    result['response']    = notarize_info['Status Message']
+    result['status']      = notarize_info['Status']
+
+    result['rc']          = process.returncode
 
     module.exit_json(**result)
 
