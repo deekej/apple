@@ -528,7 +528,7 @@ def run_module():
 
     # -----------------------------------------------------------------
 
-    cmd.append(' '.join(paths))
+    cmd.extend(paths)
 
     # Run the actual signing:
     try:
