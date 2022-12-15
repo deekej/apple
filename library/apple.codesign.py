@@ -534,12 +534,7 @@ def run_module():
     try:
         subprocess.run(cmd, capture_output=True, check=True, text=True, encoding='ascii')
     except subprocess.CalledProcessError as ex:
-        if ex.stderr.find('errSecInternalComponent'):
-            error_msg = 'code signing is not possible - security keychain is locked'
-        else:
-            error_msg = ex.stderr.rstrip()
-
-        module.fail_json(msg=error_msg, **result)
+        module.fail_json(msg=str(ex.stderr), **result)
     except Exception as ex:
         module.fail_json(msg=str(ex), **result)
 
