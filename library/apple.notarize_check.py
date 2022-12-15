@@ -286,16 +286,19 @@ def run_module():
 
     response = parse_plist(process.stdout)
 
-    notarize_info         = response['notarization-info']
-    result['msg']         = response['success-message']
+    notarize_info           = response['notarization-info']
+    result['msg']           = response['success-message']
 
-    result['logfile_URL'] = notarize_info['LogFileURL']
-    result['timestamp']   = notarize_info['Date'].isoformat()
-    result['checksum']    = notarize_info['Hash']
-    result['response']    = notarize_info['Status Message']
-    result['status']      = notarize_info['Status']
+    result['logfile_URL']   = notarize_info.get('LogFileURL')
+    result['checksum']      = notarize_info.get('Hash')
+    result['response']      = notarize_info.get('Status Message')
+    result['status']        = notarize_info.get('Status')
+    timestamp               = notarize_info.get('Date')
 
-    result['rc']          = process.returncode
+    if timestamp is not None:
+        result['timestamp'] = timestamp.isoformat()
+
+    result['rc']            = process.returncode
 
     module.exit_json(**result)
 
