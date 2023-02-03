@@ -202,7 +202,9 @@ def run_module():
         xcrun_binary       = xcrun_binary,
         toolchain          = toolchain,
         sdk                = sdk,
-        nocache            = nocache
+        nocache            = nocache,
+        status             = 'not started',
+        rc                 = -1,
     )
 
     # -----------------------------------------------------------------
@@ -280,6 +282,8 @@ def run_module():
 
         module.fail_json(msg=error_msg, **result)
     except Exception as ex:
+        result['status'] = 'error'
+
         module.fail_json(msg=str(ex), **result)
 
     # -----------------------------------------------------------------
