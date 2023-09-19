@@ -168,14 +168,6 @@ options:
         default: null
         type: integer
 
-    deep:
-        description:
-            - Specifies that nested code content such as helpers, frameworks, and plug-ins, should be recursively signed when signing a bundle.
-            - Beware that all signing options you specify will apply, in turn, to such nested content.
-        required: false
-        default: false
-        type: boolean
-
     force:
         description:
             - Causes M(codesign) to replace any existing signature on the path(s) given. Without this option, existing signatures will not be replaced, and the signing operation fails.
@@ -240,7 +232,6 @@ EXAMPLES = r'''
       - foo-darwin-arm64
       - bar-darwin-amd64
     identity:       "Developer ID Application: Dee'Kej, Inc. (AABBCC1234)"
-    deep:           true
     force:          true
     atomic:         true
     flags:
@@ -319,7 +310,6 @@ def run_module():
         timestamp               = dict(type='bool', required=False, default=False),
         atomic                  = dict(type='bool', required=False, default=False),
         force                   = dict(type='bool', required=False, default=False),
-        deep                    = dict(type='bool', required=False, default=False),
         detached_database       = dict(type='bool', required=False, default=False),
         preserve_metadata       = dict(type='bool', required=False, default=False),
         metadata                = dict(type='list', required=False, default=None, elements='str'),
@@ -354,7 +344,6 @@ def run_module():
     timestamp         = module.params['timestamp']
     atomic            = module.params['atomic']
     force             = module.params['force']
-    deep              = module.params['deep']
     detached_database = module.params['detached_database']
     preserve_metadata = module.params['preserve_metadata']
     metadata          = module.params['metadata']
@@ -386,7 +375,6 @@ def run_module():
         timestamp         = timestamp,
         atomic            = atomic,
         force             = force,
-        deep              = deep,
         detached_database = detached_database,
         preserve_metadata = preserve_metadata,
         metadata          = metadata,
@@ -486,9 +474,6 @@ def run_module():
 
     if force:
         cmd.append('--force')
-
-    if deep:
-        cmd.append('--deep')
 
     if detached_database:
         cmd.append('--detached-database')
