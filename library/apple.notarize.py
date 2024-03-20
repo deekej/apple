@@ -14,7 +14,7 @@ short_description: Submits given path for macOS notarization on Apple's servers.
 
 description:
   - This module submits given path for notarization of code signed binary / app.
-  - It uses the older M(altool) for the notarization submission.
+  - It uses notarytool from Xcode 13
 
 options:
   path:
@@ -23,15 +23,13 @@ options:
     required: true
     type: path
 
+  keychain_profile:
+    description:
+      - Name of keychain profile if account's app password is already stored by notarytool
+  
   username:
     description:
       - Username of Apple developer account to use when running the notarization process.
-    required: true
-    type: string
-
-  bundle_ID:
-    description:
-      - String to uniquely identify the notarized file.
     required: true
     type: string
 
@@ -73,39 +71,39 @@ options:
     type: path
     default: None
 
-  altool_binary:
+  notarytool_binary:
     description:
-      - Path to M(altool) binary which should be used for the notarization.
-      - Allows overriding the default lookup process for the M(altool) binary.
+      - Path to M(notarytool) binary which should be used for the notarization.
+      - Allows overriding the default lookup process for the M(notarytool) binary.
     required: false
     type: path
     default: None
 
   xcrun_binary:
     description:
-      - Path to M(xcrun) binary, which is used for lookup of the M(altool) binary location.
-      - Allows partial overriding of the default lookup process for the M(altool) binary.
+      - Path to M(xcrun) binary, which is used for lookup of the M(notarytool) binary location.
+      - Allows partial overriding of the default lookup process for the M(notarytool) binary.
     required: false
     type: path
     default: None
 
   sdk:
     description:
-      - SDK version to use when the automatic lookup of the M(altool) binary happens.
+      - SDK version to use when the automatic lookup of the M(notarytool) binary happens.
     required: false
     type: string
     default: None
 
   toolchain:
     description:
-      - Toolchain to use when the automatic lookup of the M(altool) binary happens.
+      - Toolchain to use when the automatic lookup of the M(notarytool) binary happens.
     required: false
     type: string
     default: None
 
   nocache:
     description:
-      - Disables the usage of cache when doing the lookup of M(altool) binary location.
+      - Disables the usage of cache when doing the lookup of M(notarytool) binary location.
     required: false
     type: boolean
     default: False
@@ -150,6 +148,7 @@ EXAMPLES = r'''
 import atexit
 import gc
 import os
+import json
 import plistlib
 import shutil
 import subprocess
@@ -159,8 +158,9 @@ from ansible.module_utils.basic import env_fallback
 
 cmd = None
 API_key = None
+username = None
 password = None
-
+keychain_profile = None
 # ---------------------------------------------------------------------
 
 def clear_sensitive_data():
@@ -174,23 +174,24 @@ def parse_plist(xml_string):
 
 
 def run_module():
-    global cmd, API_key, password
+    global cmd, API_key, password, keychain_profile
 
     # Ansible Module arguments initialization:
     module_args = dict(
         path               = dict(type='path', required=True),
-        username           = dict(type='raw',  required=True),
-        bundle_ID          = dict(type='raw',  required=True),
+        keychain_profile   = dict(type='raw', required=False),
+        username           = dict(type='raw',  required=False),
         password           = dict(type='raw',  required=False, default=None, no_log=True),
         API_key            = dict(type='raw',  required=False, default=None, no_log=True),
         API_issuer         = dict(type='raw',  required=False, default=None),
         ASC_provider       = dict(type='raw',  required=False, default=None),
         chdir              = dict(type='path', required=False, default=None),
-        altool_binary      = dict(type='path', required=False, default=None),
+        notarytool_binary  = dict(type='path', required=False, default=None),
         xcrun_binary       = dict(type='path', required=False, default=None),
         sdk                = dict(type='raw',  required=False, default=None),
         toolchain          = dict(type='raw',  required=False, default=None),
         nocache            = dict(type='bool', required=False, default=False),
+        wait               = dict(type='bool', required=False, default=False),
         checksum_algorithm = dict(type='str',  required=False, default='sha256',
                                   choices=['md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512'],
                                   aliases=['checksum', 'checksum_algo'])
@@ -200,13 +201,15 @@ def run_module():
     module = AnsibleModule(
         argument_spec       = module_args,
         mutually_exclusive  = [
-            ('API_key', 'password')
+            ('API_key', 'password'),
+            ('keychain_profile', 'username')
         ],
         required_one_of     = [
-            ('API_key', 'password')
+            ('API_key', 'password', 'keychain_profile')
         ],
         required_together   = [
-            ('API_key', 'API_issuer')
+            ('API_key', 'API_issuer'),
+            ('username', 'password')
         ],
         supports_check_mode = False
     )
@@ -214,27 +217,28 @@ def run_module():
     # Make sure we clear the sensitive data no matter the result:
     atexit.register(clear_sensitive_data)
 
+    keychain_profile   = module.params['keychain_profile']
     username           = module.params['username']
-    bundle_ID          = module.params['bundle_ID']
     password           = module.params['password']
     API_key            = module.params['API_key']
     API_issuer         = module.params['API_issuer']
     ASC_provider       = module.params['ASC_provider']
     chdir              = module.params['chdir']
-    altool_binary      = module.params['altool_binary']
+    notarytool_binary  = module.params['notarytool_binary']
     xcrun_binary       = module.params['xcrun_binary']
     sdk                = module.params['sdk']
     toolchain          = module.params['toolchain']
     nocache            = module.params['nocache']
     checksum_algorithm = module.params['checksum_algorithm']
+    wait               = module.params['wait']
 
     path = os.path.expanduser(module.params['path'])
 
     if chdir:
         chdir = os.path.expanduser(chdir)
 
-    if altool_binary:
-        altool_binary = os.path.expanduser(altool_binary)
+    if notarytool_binary:
+        notarytool_binary = os.path.expanduser(notarytool_binary)
 
     if xcrun_binary:
         xcrun_binary = os.path.expanduser(xcrun_binary)
@@ -244,14 +248,14 @@ def run_module():
     result = dict(
         changed            = False,
         path               = path,
+        keychain_profile   = keychain_profile,
         username           = username,
-        bundle_ID          = bundle_ID,
         password           = '[REDACTED]',
         API_key            = '[REDACTED]',
         API_issuer         = API_issuer,
         ASC_provider       = ASC_provider,
         chdir              = chdir,
-        altool_binary      = altool_binary,
+        notarytool_binary  = notarytool_binary,
         xcrun_binary       = xcrun_binary,
         toolchain          = toolchain,
         sdk                = sdk,
@@ -272,14 +276,14 @@ def run_module():
 
     # -----------------------------------------------------------------
 
-    if not altool_binary:
+    if not notarytool_binary:
         if not xcrun_binary:
             xcrun_binary = shutil.which('xcrun')
 
             if not xcrun_binary:
                 module.fail_json(msg="'xcrun' binary not found on the system", **result)
 
-        cmd = [xcrun_binary, '--find', 'altool']
+        cmd = [xcrun_binary, '--find', 'notarytool']
 
         if sdk:
             cmd.extend(['--sdk', sdk])
@@ -298,21 +302,24 @@ def run_module():
         except Exception as ex:
             module.fail_json(msg=str(ex), **result)
 
-        altool_binary = process.stdout.rstrip()
+        notarytool_binary = process.stdout.rstrip()
 
     # -----------------------------------------------------------------
 
     cmd = [
-        altool_binary,
-        '--notarize-app',
-        '--output-format', 'xml',
-        '--primary-bundle-id', bundle_ID,
-        '-f', path,
-        '-u', username
+        notarytool_binary,
+        'submit',
+        path,
+        '-f', 'json'
     ]
 
-    if password:
-        cmd.extend(['-p', password])
+    if wait:
+        cmd.append('--wait')
+
+    if username:
+        cmd.extend(['-u', username, '-p', password])
+    elif keychain_profile:
+        cmd.extend(['--keychain-profile', keychain_profile])
     else:
         cmd.extend(['--apiKey', API_key])
         cmd.extend(['--apiIssuer', API_issuer])
@@ -326,15 +333,19 @@ def run_module():
 
     if password:
         result['command'] = (' '.join(cmd)).replace(password, '******')
-    else:
+    elif API_key:
         result['command'] = (' '.join(cmd)).replace(API_key,  '******')
+    else:
+        result["command"] = (' '.join(cmd))
 
     # -----------------------------------------------------------------
 
     try:
         process = subprocess.run(cmd, capture_output=True, check=True,
-                                 text=True, encoding='ascii')
+                                 text=True, encoding='utf-8')
+        process_output = json.loads(process.stdout)
     except subprocess.CalledProcessError as ex:
+        # TODO: Need to check what the failure actually looks like, this might fail
         result['status'] = 'failed'
         result['rc'] = ex.returncode
 
@@ -351,15 +362,19 @@ def run_module():
 
     # -----------------------------------------------------------------
 
-    response = parse_plist(process.stdout)
+    if process_output.get('status') == 'Accepted':
+        result['message'] = process_output.get('message')
+        result['id'] = process_output.get('id')
+        result['status']  = 'success'
+        module.exit_json(**result)
+    else:
+        submission_id = process_output.get('id')
+        log_failure_cmd = [notarytool_binary, 'log','--keychain-profile',keychain_profile, submission_id]
+        failure_check = subprocess.run(log_failure_cmd, capture_output=True, check=True,
+                                        text=True, encoding='ascii')
+        error_msg = failure_check.stdout.get('issues')
+        module.fail_json(msg=error_msg, **result)
 
-    result['msg']     = response['success-message']
-    result['UUID']    = response['notarization-upload']['RequestUUID']
-
-    result['status']  = 'success'
-    result['rc']      = process.returncode
-
-    module.exit_json(**result)
 
 # =====================================================================
 
