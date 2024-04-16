@@ -12,8 +12,6 @@ module: apple.unlock_keychain
 
 short_description: Unlocks security keychain on macOS machine
 
-version_added: "1.0.0"
-
 description: This module is used to unlock security keychain on macOS
              machine, so follow up macOS tasks can run...
 
@@ -36,7 +34,7 @@ author:
 
 EXAMPLES = r'''
 - name: Unlock non-default macOS security keychain
-  unlock.keychain:
+  apple.unlock_keychain:
     password:     "{{ keychain_password }}"
     keychain:     /Users/deekej/Library/Keychains/custom-keychain.db
   no_log:         true
