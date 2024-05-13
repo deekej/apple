@@ -279,7 +279,7 @@ message:
     sample: Archive contains critical validation errors
 
 status:
-    description: A single-word status of the notarization submission - either M(running), M(success) or M(failed).
+    description: A single-word status of the notarization submission - either M(running), M(success), M(failed), or M(error).
     returned: always
     type: str
     sample: running
@@ -454,7 +454,6 @@ def run_module():
                                   aliases=['checksum', 'checksum_algo']),
     )
 
-    # TODO: Specify the arguments dependencies!
     # Parsing of Ansible Module arguments:
     module = AnsibleModule(
         argument_spec       = module_args,
@@ -503,9 +502,10 @@ def run_module():
     #       module does not apply any changes to its host or its files...
     result = dict(
         changed            = False,
+        checksum           = None,
         log                = None,
         id                 = None,
-        checksum           = None,
+        status             = 'error',
         app_password       = '[REDACTED]',
         action             = params.action,
         path               = params.path,
