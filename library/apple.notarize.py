@@ -365,7 +365,7 @@ def clear_sensitive_data():
 
 
 # NOTE: We can only use one authentication method at a time...
-def get_auth_options(params):
+def set_auth_options(params):
     global auth_options
 
     if params.keychain_profile:
@@ -382,7 +382,7 @@ def get_auth_options(params):
         auth_options.extend(['--team-id',  params.team_id])
         auth_options.extend(['--password', params.app_password])
 
-    return auth_options
+    return
 
 
 def get_submit_command(params):
@@ -587,7 +587,7 @@ def run_module():
 
     # -----------------------------------------------------------------
 
-    auth_options = get_auth_options(params)
+    set_auth_options(params)
 
     if params.action == 'submit':
         cmd = get_submit_command(params)
