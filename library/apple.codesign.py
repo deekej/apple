@@ -660,8 +660,17 @@ def run_module():
     try:
         subprocess.run(cmd, capture_output=True, check=True, text=True, encoding='ascii')
     except subprocess.CalledProcessError as ex:
-        module.fail_json(msg=str(ex.stderr), **result)
+        if 'errSecInternalComponent' in ex.stderr:
+            error = 'Failed to access credentials from Security Keychain.\n'
+            error += 'Follow this post for troubleshooting the issue:\n'
+            error += 'https://forums.developer.apple.com/forums/thread/712005'
+        else:
+            error = str(ex.stderr)
+
+        result['rc'] = ex.returncode
+        module.fail_json(msg=error, **result)
     except Exception as ex:
+        result['rc'] = ex.returncode
         module.fail_json(msg=str(ex), **result)
 
     # -----------------------------------------------------------------
